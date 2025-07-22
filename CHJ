@@ -1,1 +1,112 @@
+"""
+Galvo mirror raster scan
+"""
 
+import datetime
+import time
+from qm import SimulationConfig, LoopbackInterface
+from qm.qua import *
+from qm import QuantumMachinesManager
+from galvo_raster_config import *
+import matplotlib.pyplot as plt
+import pandas as pd
+import os
+
+#%%
+################### 
+# The QUA program #
+###################
+
+plot = True
+test = False
+
+#############################
+####### Simulation Parameters ##########
+
+S_counter parameters
+total_integration_time = int(0.4 * u.us) // 4  # Total duration of the measurement
+single_integration_time_ns = int(0.4 * u.us) // 4 # 400us # Duration of a single chunk. Needed because the OPX cannot measure for more than ~1ms
+single_integration_time_cycles = single_integration_time_ns // 4
+n_count = int(total_integration_time / single_integration_time_ns) # Number of chunks to get the total measurement time
+count_wait_time = 0.1 * u.us // 4
+
+
+# S_galvo mirror parameters
+pixel_x = 3 #default 321
+pixel_y = 3 #default 321
+
+voltage_x_add = 2 * ( - mirror_amp) / ((pixel_x-1) * mirror_amp)
+voltage_y_add = 2 * ( - mirror_amp) / ((pixel_y-1) * mirror_amp)
+
+galvo_ramp_time = 1_000 *u.ns // 4 # 1 us
+
+galvo_x_time = 1 * u.us // 4 + total_integration_time + 2*count_wait_time
+
+galvo_y_time = galvo_ramp_time + galvo_x_time * (pixel_x + 1)
+
+galvo_wait_time = 1 * u.us
+
+ramp_x_voltage = (mirror_amp)/(galvo_ramp_time*4)
+ramp_y_voltage = (mirror_amp)/(galvo_ramp_time*4)
+
+#####
+laser_cycle = 0.5 * u.us //4
+laser_cycle = total_integration_time*1.1
+laser_wait = 16 * u.ns //4 + detection_delay_1 //4
+
+intialization_pulse = 30*u.us//4
+microwave_pulse = 20*u.us//4
+
+readout_pulse = single_integration_time_ns
+sequence_wait_time = 1*u.us//4
+
+pulse_wait_time = 100* u.ns //4
+
+wait_time = 0.1*u.us
+
+
+
+#####################################
+#  Open Communication with the QOP  #
+#####################################
+qmm = QuantumMachinesManager(host=qop_ip, port=qop_port)
+
+###########################
+# Run or Simulate Program #
+###########################
+
+
+
+simulate = True
+get_ipython().run_line_magic('matplotlib', 'qt')
+
+now = datetime.datetime.now()
+formattedDate = now.strftime("%Y%m%d_%H%M%S")
+
+if simulate:
+    simul_duration = 10 * u.ms // 4
+    # Simulates the QUA program for the specified duration
+    simulation_config = SimulationConfig(duration=simul_duration)  # In clock cycles = 4ns
+    # Simulate blocks python until the simulation is done
+    job = qmm.simulate(config, raster_scan, simulation_config)
+    # Get the simulated samples
+    samples = job.get_simulated_samples()
+    # Plot the simulated samples
+    fig, ax = plt.subplots()
+    # ax.plot(samples.con1.analog["1"], ':', label="measure")
+    ax.plot(samples.con1.analog["1"],'-', linewidth=0.1 , label="Analog 1(RF)")
+    ax.plot(samples.con1.analog["3"], '-', linewidth=2 ,label="Analog 3(V_x)")
+    ax.plot(samples.con1.analog["4"], '-', linewidth=2 ,label="Analog 4(V_y)")
+    ax.plot(samples.con1.digital["5"],'-', linewidth=2 , label="Digital 5 SPCM timing") # measure timing
+    ax.plot(samples.con1.digital["7"], linewidth=2, label="Digital 7 AOM timing") # AOM timing
+    plt.grid(':', color = '0.5', linewidth=0.1)
+    ax.set_ylim(-0.2, 0.2)
+    ax.legend()
+    ax.set_xlabel("Time [ns]")
+    ax.set_ylabel("Output")
+    # Get the waveform report object
+    # waveform_report = job.get_simulated_waveform_report()
+    # Cast the waveform report to a python dictionary
+    # waveform_dict = waveform_report.to_dict()
+    # Visualize and save the waveform report
+    # waveform_report.create_plot(samples, plot=True, save_path=str(Path(__file__).resolve()))
