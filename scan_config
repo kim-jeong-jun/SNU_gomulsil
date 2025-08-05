@@ -1,3 +1,4 @@
+
 from pathlib import Path
 import numpy as np
 from qualang_tools.units import unit
@@ -91,7 +92,7 @@ rf_length = 1000
 # Galvo mirror setting
 mirror_frequency = 0 * u.Hz 
 # mirror_amp = -0.15
-mirror_amp = -0.05
+mirror_amp = -0.03
 
 # Readout parameters
 signal_threshold_1 = -500
@@ -215,7 +216,7 @@ config = {
         "Trigger": {
             "digitalInputs": {
                 "marker": {
-                    "port": ("con1", 5),
+                    "port": ("con1", 4),
                     "delay": laser_delay_2,
                     "buffer": 0,
                 },
@@ -224,60 +225,61 @@ config = {
                 "trigger": "zero_pulse_2",
             },
         },
-        # "SPCM1": {
-        #     "singleInput": {"port": ("con1", 5)},  # not used
-        #     "digitalInputs": {  # for visualization in simulation
-        #         "marker": {
-        #             "port": ("con1", 5),
-        #             "delay": detection_delay_1,
-        #             "buffer": 0,
-        #         },
-        #     },
-        #     "operations": {
-        #         "readout": "readout_pulse_1",
-        #         "long_readout": "long_readout_pulse_1",
-        #         "cw" : "const_pulse_single"
-        #     },
-        #     "outputs": {"out1": ("con1", 1)}, # analog input 1
-        #     'timeTaggingParameters': {   # Time tagging parameters
-        #         'signalThreshold': signal_threshold_1,
-        #         'signalPolarity': 'Below',
-        #         'derivativeThreshold': -10_000,
-        #         'derivativePolarity': 'Above'
-        #     },
-        #     "time_of_flight": detection_delay_1,
-        #     "smearing": 0,
-        # },
-        
-
-    "SPCM1": {
-        "singleInput": {"port": ("con1", 1)},  # not used
-        "digitalInputs": {
-            "marker": {  # for visualization in simulation
-                "port": ("con1", 3),
-                "delay": detection_delay_1,
-                "buffer": 0,
+        "SPCM1": {
+            "singleInput": {"port": ("con1", 1)},  # not used
+            "digitalInputs": {  # for visualization in simulation
+                "marker": {
+                    "port": ("con1", 5),
+                    "delay": detection_delay_1,
+                    "buffer": 0,
+                },
             },
-            "gating": {  # NEW: gating 신호를 줄 포트 설정
-                "port": ("con1", 6),  # 실제 연결된 디지털 포트 번호로 수정
-                "delay": gate_delay,  # 게이팅 신호의 지연 시간 설정
-                "buffer": 0,
+            "operations": {
+                "readout": "readout_pulse_1",
+                "long_readout": "long_readout_pulse_1",
+                "cw" : "const_pulse_single"
             },
-        },
-        "operations": {
-            "readout": "readout_pulse_1",
-            "long_readout": "long_readout_pulse_1",
-        },
-       'timeTaggingParameters': {   # Time tagging parameters
+            "outputs": {"out1": ("con1", 1)}, # analog input 1
+            'timeTaggingParameters': {   # Time tagging parameters
                 'signalThreshold': signal_threshold_1,
                 'signalPolarity': 'Below',
-                'derivativeThreshold': -10_000,
+                'derivativeThreshold': -2_000,
                 'derivativePolarity': 'Above'
-       
-    },
-    "time_of_flight": detection_delay_1,
-    "smearing": 0,
-},
+            },
+            "time_of_flight": detection_delay_1,
+            "smearing": 0,
+        },
+        
+
+    # "SPCM1": {
+    #     "singleInput": {"port": ("con1", 1)},  # not used
+    #     "digitalInputs": {
+    #         "marker": {  # for visualization in simulation
+    #             "port": ("con1", 3),
+    #             "delay": detection_delay_1,
+    #             "buffer": 0,
+    #         },
+    #         # "gating": {  # NEW: gating 신호를 줄 포트 설정
+    #         #     "port": ("con1", 6),  # 실제 연결된 디지털 포트 번호로 수정
+    #         #     "delay": gate_delay,  # 게이팅 신호의 지연 시간 설정
+    #         #     "buffer": 0,
+    #         # },
+    #     },
+    #     "operations": {
+    #         "readout": "readout_pulse_1",
+    #         "long_readout": "long_readout_pulse_1",
+    #         "ON":"gating_pulse",
+    #     },
+    #     "outputs": {"out1": ("con1", 1)}, # analog input 1
+    #     'timeTaggingParameters': {   # Time tagging parameters
+    #         'signalThreshold': signal_threshold_1,
+    #         'signalPolarity': 'Below',
+    #         'derivativeThreshold': -10_000,
+    #         'derivativePolarity': 'Above'
+    #     },        
+    #     "time_of_flight": detection_delay_1,
+    #     "smearing": 0,
+    # },
 
         "SPCM2": {
             "singleInput": {"port": ("con1", 2)},  # not used
@@ -394,6 +396,11 @@ config = {
         },
         "zero_pulse_2": {
             "operation": "control",
+            "length": 16000000,
+            "digital_marker": "ON",
+        },
+        "gating_pulse": {
+            "operation": "control",
             "length": 16,
             "digital_marker": "ON",
         },
@@ -410,6 +417,7 @@ config = {
     "digital_waveforms": {
         "ON": {"samples": [(1, 0)]},  # [(on/off, ns)]
         "OFF": {"samples": [(0, 0)]},  # [(on/off, ns)]
+        "MW_ON": {"samples": [(1, 0)]},
     },
     "integration_weights": {
         "constant_weights": {
