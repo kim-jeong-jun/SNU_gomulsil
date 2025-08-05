@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Aug  5 15:30:01 2025
+
+@author: user
+"""
+
 """
 Galvo mirror raster scan
 """
@@ -7,7 +14,7 @@ import time
 from qm import SimulationConfig, LoopbackInterface
 from qm.qua import *
 from qm import QuantumMachinesManager
-from galvo_raster_config import *
+from config_chj import *
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -25,16 +32,16 @@ test = False
 
 
 
-total_integration_time = int(100 * u.ms) // 4 # Total duration of the measurement
-single_integration_time_ns = int(500* u.us) // 4  # 500us # Duration of a single chunk. Needed because the OPX cannot measure for more than ~1ms
+total_integration_time = int(20 * u.ms) // 4 # Total duration of the measurement
+single_integration_time_ns = int(1* u.ms) // 4  # 500us # Duration of a single chunk. Needed because the OPX cannot measure for more than ~1ms
 single_integration_time_cycles = single_integration_time_ns // 4
 n_count = int(total_integration_time / single_integration_time_ns) # Number of chunks to get the total measurement time
 count_wait_time = 80 * u.ns // 4
 integration_time_sec = total_integration_time * 1e-9 * 4
 
 #galvo mirror parameters
-pixel_x = 101 #default 321
-pixel_y = 101 #default 321
+pixel_x = 11 #default 321
+pixel_y = 11 #default 321
 
 voltage_x_add = 2 * ( - mirror_amp) / ((pixel_x-1) * mirror_amp)
 voltage_y_add = 2 * ( - mirror_amp) / ((pixel_y-1) * mirror_amp)
@@ -119,15 +126,15 @@ with program() as raster_scan:
                 
             wait(laser_wait_time, "AOM", "SPCM1")
 
-            play("laser_ON", "AOM", duration=laser_cycle)  
-                                            # 5. Laser On before measurement
-
+            play("laser_ON", "AOM", duration=laser_cycle) # 5. Laser On before measurement
             wait(count_wait_time, "SPCM1")
             
-            with for_(n, 0, n < n_count, n + 1):                                                # 6. measurement
-                play("ON", "SPCM1", duration=single_integration_time_ns)                        # 💡 Gating ON
+            with for_(n, 0, n < n_count, n + 1):      
+                
+                play("trigger", "Trigger", duration = single_integration_time_ns)    
+                            # 6. measurement
                 measure("readout", "SPCM1", time_tagging.analog(times, single_integration_time_ns, counts))
-                play("OFF", "SPCM1", duration=4)                                                # 💡 Gating OFF (한 클럭=4ns)
+
                 assign(total_counts, total_counts + counts)
 
             save(total_counts, counts_st)                                                       # 7. save photon counts result for a pixel as stream
@@ -172,11 +179,12 @@ if simulate:
     # Plot the simulated samples
     fig, ax = plt.subplots()
     # ax.plot(samples.con1.analog["1"], ':', label="measure")
-    ax.plot(samples.con1.analog["3"], '-', linewidth=2 ,label="Analog 3(x)")
-    ax.plot(samples.con1.analog["4"], '-', linewidth=2 ,label="Analog 4(y)")
-    ax.plot(samples.con1.digital["1"],'-', linewidth=1 , label="Digital 1") # measure timing
+    ax.plot(samples.con1.analog["3"], '-', linewidth=2 ,label="mirror 3(x)")
+    ax.plot(samples.con1.analog["4"], '-', linewidth=2 ,label="mirror 4(y)")
+    ax.plot(samples.con1.digital["4"],'-', linewidth=1 , label="Trigger 4")
+    ax.plot(samples.con1.digital["5"],'-', linewidth=1 , label="SPCM 5") # measure timing
+    ax.plot(samples.con1.digital["7"], linewidth=1, label="AOM 7") # AOM timing
     plt.grid(':', color = '0.5', linewidth=0.1)
-    ax.plot(samples.con1.digital["7"], linewidth=1, label="Digital 7") # AOM timing
     ax.set_ylim(-0.2, 0.2)
     ax.legend()
     ax.set_xlabel("Time [ns]")
