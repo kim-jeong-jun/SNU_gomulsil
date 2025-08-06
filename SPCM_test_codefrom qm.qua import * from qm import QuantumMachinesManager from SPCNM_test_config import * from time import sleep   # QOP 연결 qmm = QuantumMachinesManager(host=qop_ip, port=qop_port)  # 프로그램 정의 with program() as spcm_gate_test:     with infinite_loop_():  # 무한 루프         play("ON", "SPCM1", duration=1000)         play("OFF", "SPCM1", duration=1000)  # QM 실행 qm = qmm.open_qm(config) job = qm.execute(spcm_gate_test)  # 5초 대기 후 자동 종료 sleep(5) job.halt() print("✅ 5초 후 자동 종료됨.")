@@ -1,0 +1,23 @@
+from qm.qua import *
+from qm import QuantumMachinesManager
+from SPCNM_test_config import *
+from time import sleep
+
+
+# QOP 연결
+qmm = QuantumMachinesManager(host=qop_ip, port=qop_port)
+
+# 프로그램 정의
+with program() as spcm_gate_test:
+    with infinite_loop_():  # 무한 루프
+        play("ON", "SPCM1", duration=1000)
+        play("OFF", "SPCM1", duration=1000)
+
+# QM 실행
+qm = qmm.open_qm(config)
+job = qm.execute(spcm_gate_test)
+
+# 5초 대기 후 자동 종료
+sleep(5)
+job.halt()
+print("5초 후 자동 종료됨.")
