@@ -1,0 +1,167 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Aug  6 14:25:45 2025
+
+@author: user
+"""
+
+# from qm.qua import *
+# from qm import QuantumMachinesManager
+# from SPCM_test_config import *
+# from time import sleep
+
+
+# gate_wait_time = 1 * u.us
+# # QOP 연결
+# qmm = QuantumMachinesManager(host=qop_ip, port=qop_port)
+
+# # 프로그램 정의
+# with program() as spcm_gate_test:
+#     with infinite_loop_():  # 무한 루프
+#         play("gate_ON", "SPCM1", duration=10000)
+#         # wait(gate_wait_time, "SPCM1")
+
+#         # play("OFF", "SPCM1", duration=100000)
+
+# # QM 실행
+# qm = qmm.open_qm(config)
+# job = qm.execute(spcm_gate_test)
+
+# # 5초 대기 후 자동 종료
+# sleep(5)
+# job.halt()
+# print("5초 후 자동 종료됨.")
+
+# from qm.qua import *
+# from qm import QuantumMachinesManager
+# from SPCM_test_config import *
+# from time import sleep
+# import numpy as np
+# import matplotlib.pyplot as plt
+
+# # QOP 연결
+# qmm = QuantumMachinesManager(host=qop_ip, port=qop_port)
+
+
+
+# # 프로그램 정의
+# with program() as spcm_gate_test:
+#     # 측정 변수 선언
+#     n_counts = declare(int)
+#     total_counts = declare(int)
+#     times = declare(int, size=100)  # time tag array
+
+#     counts_stream = declare_stream()
+    
+#     with infinite_loop_():
+#         # 1. SPCM gating TTL ON
+#         play("gate_ON", "SPCM1", duration=100000)  # 20 us gating
+        
+#         # 2. 측정: gating 동안 들어온 TTL pulse count
+#         measure("readout", "SPCM1", time_tagging.analog(times, 100000, n_counts))
+#         assign(total_counts, total_counts + n_counts)
+        
+#         save(total_counts, counts_stream)
+        
+#         # 3. 잠깐 OFF 대기 (dead time 제거)
+#         wait(100000, "SPCM1")
+
+# # 실행
+# qm = qmm.open_qm(config)
+# job = qm.execute(spcm_gate_test)
+
+# # 결과 받기
+# results = job.result_handles
+# results.wait_for_all_values()
+# counts_data = results.get("counts_stream").fetch_all()
+
+# # 중단
+# sleep(5)
+# job.halt()
+# print("5초 후 자동 종료됨.")
+
+# # 출력
+# plt.plot(counts_data)
+# plt.xlabel("Loop #")
+# plt.ylabel("Total photon counts")
+# plt.title("SPCM photon counts (via OPX)")
+# plt.grid(True)
+# plt.show()
+
+from qm import QuantumMachinesManager
+from qm.qua import *
+from SPCM_test_config import *  # ← 반드시 실험용 config 사용
+import matplotlib.pyplot as plt
+import numpy as np
+
+# 단위 정의
+# u = units
+
+# 실험 파라미터
+total_integration_time = int(1 * u.ms)
+single_integration_time_ns = int(500 * u.us)
+single_integration_time_cycles = single_integration_time_ns // 4
+n_count = total_integration_time // single_integration_time_ns
+
+# QUA program
+with program() as counter:
+    times = declare(int, size=1000)
+    counts = declare(int)
+    total_counts = declare(int)
+    n = declare(int)
+    counts_st = declare_stream()
+
+    with infinite_loop_():
+        with for_(n, 0, n < n_count, n + 1):
+            # SPCM gating TTL은 수동 또는 외부에서 계속 켜진 상태라고 가정
+            play("gate_ON", "SPCM1", duration=single_integration_time_cycles)
+            play("laser_ON", "AOM", duration=single_integration_time_cycles)
+
+
+            measure("readout", "SPCM1", time_tagging.analog(times, single_integration_time_ns, counts))
+            assign(total_counts, total_counts + counts)
+
+        save(total_counts, counts_st)
+        assign(total_counts, 0)
+
+    with stream_processing():
+        counts_st.with_timestamps().save("counts")
+
+# QOP 연결 및 실행
+qmm = QuantumMachinesManager(host=qop_ip, port=qop_port)
+qm = qmm.open_qm(config)
+job = qm.execute(counter)
+
+# 결과 핸들 가져오기
+results = job.result_handles
+results.wait_for_all_values()
+counts_handle = results.get("counts")
+
+# 실시간 그래프 초기화
+time = []
+counts = []
+plt.ion()
+fig, ax = plt.subplots()
+
+try:
+    while results.is_processing():
+        new_data = counts_handle.fetch_all()
+
+        if "value" in new_data and "timestamp" in new_data:
+            cps = new_data["value"] / total_integration_time / 1000  # kcps
+            ts = new_data["timestamp"] / u.s
+
+            counts.append(cps)
+            time.append(ts)
+
+            ax.clear()
+            ax.set_xlabel("Time [s]")
+            ax.set_ylabel("Counts [kcps]")
+            ax.set_title("SPCM Live Photon Counter")
+            ax.plot(time[-50:], counts[-50:])
+            plt.pause(0.1)
+
+except KeyboardInterrupt:
+    print("Interrupted by user.")
+
+job.halt()
