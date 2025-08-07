@@ -33,14 +33,14 @@ with program() as hello_QUA:
 
     a = declare(int)
     b = declare(int)
-    
+#AOM 켜기: turn_on_laser.py line 41-42 활성화<
     with infinite_loop_():
         # Trigger pulses
         with for_(a, 0, a<10, a+1):
             play("laser_ON", "AOM", duration=cycle+(a*0)) ## AOM 
         # play("Sync", "TCSPC")  ## TCSPC Sync
         # # play("laser_ON", "Trigger") ## SR400 Trigger
-        
+# Galvo Mirror 움직이기만 하도록 켜기 : turn_on_laser.py line 45-46 활성화<br>
         # ## Galvo mirror  pulse 0.2V 1Hz
 #        play("const", "mirror_x", duration = total_cycle) ## Galvo mirror1
  #       play("const", "mirror_y", duration = total_cycle) ## Galvo mirror2
