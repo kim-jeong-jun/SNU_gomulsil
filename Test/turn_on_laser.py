@@ -25,8 +25,8 @@ time = 10 * u.ms
 cycle = time // 4
 wait_cycle = cycle 
 total_cycle = cycle + wait_cycle
-
-
+#Checking configuration parameters 
+#galvo_raster_config.py / #Galvo mirror setting / mirror_amp & mirror_frequency<br>
 
 with program() as hello_QUA:
     # a = declare(fixed)
