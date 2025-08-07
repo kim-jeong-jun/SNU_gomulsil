@@ -61,7 +61,7 @@ qmm = QuantumMachinesManager(host=qop_ip, port=qop_port)
 
 qm = qmm.open_qm(config)
 job = qm.execute(hello_QUA)
-
+#작동 멈출 때는 job.halt() + enter 로 동작 멈춰야 합니다.
     
     # time.sleep(0.5)
     # job.halt()
