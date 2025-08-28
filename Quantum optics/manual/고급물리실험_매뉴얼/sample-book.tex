@@ -1,0 +1,133 @@
+\documentclass[symmetric]{tufte-book}
+
+\title{Guide Manual for\\Senior Physic\\Laboratory:\\ Quantum Optics}
+\author{SNU Dept. of Phys.}
+\publisher{Kim Heeju, Kim Jungjun, Park Youngmin}
+
+
+%%
+% Just some sample text
+\usepackage{lipsum}
+\usepackage{kotex}
+
+
+%%
+% For graphics / images
+\usepackage{graphicx}
+\setkeys{Gin}{width=\linewidth,totalheight=\textheight,keepaspectratio}
+\graphicspath{{graphics/}}
+
+% 헤더 만들기
+    \usepackage{fancyhdr}
+    % (1) 막대/폰트/간격을 한 번에 바꾸기 위한 사용자 매크로
+    \newcommand{\headfontsize}{\normalsize}      % 헤더 글자 크기
+    \newcommand{\headsepbarheight}{3ex}        % 막대 높이
+    \newcommand{\headsepbarwidth}{1pt}         % 막대 두께
+    \newcommand{\headsepbarcolor}{black!70}      % 막대 색
+    \newcommand{\headbar}{%
+      {\color{\headsepbarcolor}\rule{\headsepbarwidth}{\headsepbarheight}}}
+    % (2) \leftmark(챕터), \rightmark(섹션)에 "번호 + 제목"을 넣도록 재정의
+    \makeatletter
+    \renewcommand{\chaptermark}[1]{%
+      \markboth{\thechapter\enspace #1}{}}
+    \renewcommand{\sectionmark}[1]{%
+      \markright{\thesection\enspace #1}}
+    \makeatother
+    % (3) fancyhdr로 양면 헤더 구성
+    \pagestyle{fancy}
+    \fancyhf{}                               % 기존 헤더/푸터 비우기
+    \renewcommand{\headrulewidth}{0pt}       % 기본 가로줄 제거
+    % 짝수(왼쪽) 페이지 = [바깥쪽 헤더] 챕터  |  페이지
+    \fancyhead[LE]{%
+      \headfontsize
+      \thepage\enspace\headbar\enspace\nouppercase{\leftmark}}
+    % 홀수(오른쪽) 페이지 = [바깥쪽 헤더] 섹션  |  페이지
+    \fancyhead[RO]{%
+      \headfontsize
+      \nouppercase{\rightmark}\enspace\headbar\enspace\thepage}
+
+
+% 맨 앞에 표지 세팅
+    \makeatletter
+    \renewcommand{\maketitlepage}{%
+    \begingroup%
+    \setlength{\parindent}{0pt}
+    {\fontsize{24}{24}\selectfont\textit{\@author}\par}
+    \vspace{1.75in}{\fontsize{36}{54}\selectfont\@title\par}
+    \vspace{0.5in}{\fontsize{14}{14}\selectfont\textsf{\smallcaps{\@date}}\par}
+    \vfill{\fontsize{14}{14}\selectfont\textit{\@publisher}\par}
+    \thispagestyle{empty}
+    \endgroup
+    }
+    \makeatother
+
+% 목차 설정
+    \setcounter{tocdepth}{2}% 목차에 섹션까지 표시
+    \setcounter{secnumdepth}{2} % 섹션까지 넘버링 넣기
+    
+    %% 목차에 쓸 폰트 매크로
+    \newcommand{\tocchapfont}{\bfseries\large\rmfamily}   % 챕터 = 굵게 + large
+    \newcommand{\tocsecfont}{\normalsize\rmfamily}        % 섹션 = 보통 크기
+    \newcommand{\tocpagenumfont}{\normalfont\rmfamily}    % 페이지 번호 폰트
+    
+    %% 챕터 (TOC에서 들여쓰기 없음)
+    \titlecontents{chapter}%
+      [0em]                                   % 챕터는 들여쓰기 0
+      {\tocchapfont}                          % 전체 항목 서식
+      {\contentslabel{2.3em}}                 % 번호 자리 폭
+      {}                                      % 라벨 없을 때
+      {\hfill\tocpagenumfont\contentspage}    % 페이지 번호
+      [\addvspace{0.25\baselineskip}]         % 항목 뒤 간격
+    %% 섹션 (TOC에서 들여쓰기)
+    \titlecontents{section}%
+      [2.5em]                                 % ← 섹션 들여쓰기 (원하는 만큼)
+      {\tocsecfont}                           % 섹션 항목 폰트/크기
+      {\contentslabel{3.0em}}                 % "1.2" 같은 번호 폭
+      {\hspace*{3.0em}}                       % 라벨 없을 때 여백
+      {\hfill\tocpagenumfont\contentspage}    % 페이지 번호
+      [\vspace{0.15\baselineskip}]            % 항목 뒤 간격
+
+% 챕터마다 목차 넣는거
+\usepackage{minitoc}
+    \setcounter{minitocdepth}{3}      % 섹션까지 표시 (필요시 3=서브섹션)
+    \dominitoc
+    \renewcommand{\mtctitle}{}   % 제목 제거
+    \makeatletter
+    \renewcommand{\mtc@rule}{}   % 가로줄 제거
+    \makeatother
+    \renewcommand{\mtcfont}{\footnotesize\rmfamily}
+    \renewcommand{\mtcSfont}{\footnotesize\rmfamily}
+    \newcommand{\minitocmargin}{
+          \marginnote{
+            \begin{minipage}{\marginparwidth}
+              \footnotesize\rmfamily
+              \minitoc
+            \end{minipage}
+          }
+        }
+
+% Typesets the font size, leading, and measure in the form of 10/12x26 pc.
+\newcommand{\measure}[3]{#1/#2$\times$\unit[#3]{pc}}
+
+
+
+\begin{document}
+
+\maketitle
+
+% contents
+\tableofcontents
+
+\include{chapters/1. Introduction}
+\include{chapters/2. Theory}
+\include{chapters/3. HBT and GRA experiment}
+\include{chapters/4. Michelson interferometer and quantum eraser}
+
+
+\backmatter
+
+\bibliography{reference}
+\bibliographystyle{plainnat}
+
+\end{document}
+
