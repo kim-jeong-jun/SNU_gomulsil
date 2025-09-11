@@ -108,7 +108,7 @@ rf_length = 1000
 
 # Galvo parameters
 mirror_frequency = 0 * u.Hz 
-mirror_amp = -0.10
+mirror_amp = -0.1
 
 # Readout parameters
 signal_threshold_1 = -500
@@ -304,8 +304,9 @@ config = {
         },
         "const_pulse_single": {
             "operation": "control",
-            "length": rf_length,  # in ns
-            "waveforms": {"single": "rf_const_wf"},
+            "length": 1000,  # in ns
+            "waveforms": {"single": "const_wf"},
+            # "digital_marker": "MW_ON",
         },
         "laser_ON_1": {
             "operation": "control",
@@ -344,6 +345,7 @@ config = {
     },
     "waveforms": {
         "cw_wf": {"type": "constant", "sample": mw_amp_NV},
+        "const_wf": {"type": "constant", "sample": mirror_amp},
         "rf_const_wf": {"type": "constant", "sample": rf_amp},
         "x180_wf": {"type": "constant", "sample": x180_amp_NV},
         "x90_wf": {"type": "constant", "sample": x90_amp_NV},
