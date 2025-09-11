@@ -1,0 +1,303 @@
+# -*- coding: utf-8 -*-
+"""
+Galvo raster scan + per-pixel ODMR frequency sweep (MW ON/OFF)
+Sequence:
+  (x,y) 스텝 고정 → n_avg 반복(바깥) 안에서 f-스윕(안쪽) 수행
+  각 f에서 MW ON→OFF 연속 측정값을 스트림으로 저장
+  stream_processing에서 (f, n_avg) 축 평균 → (y, x, f) 큐브 생성
+Outputs:
+  - pl_off_cube, pl_on_cube: shape = (pixel_y, pixel_x, n_f)
+  - contrast_cube          : (y, x, f)  (여기서는 Ion/Ioff)
+  - 2D 히트맵(임의 f-slice), 3D 표면(z=Ion/Ioff의 f축 최소값)
+"""
+
+import datetime
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+import pandas as pd
+import time
+
+from qm.qua import *
+from qm import QuantumMachinesManager, SimulationConfig
+from qualang_tools.loops import from_array
+from qualang_tools.results import fetching_tool, progress_counter
+
+# 프로젝트 설정 (엘리먼트/펄스/주파수/타이밍/암플리튜드 등)
+from configuration_odmr_CHJ import *  # NV_IF_freq, long_meas_len_1, wait_between_runs, mirror_amp, config, u, qop_ip, qop_port
+
+# ===== 실행 옵션 =====
+plot_2d_slice   = False   # f 슬라이스 2D 히트맵
+plot_3d_surface = True    # z=Ion/Ioff 로 3D 표면(픽셀 수가 크면 무거울 수 있음)
+simulate        = False
+
+# ===== 래스터 해상도 =====
+pixel_x = 31
+pixel_y = 31
+
+# ===== 갈보 램프/스텝 파라미터 =====
+galvo_ramp_time = 1_000_000 * u.ns // 4  # 1 ms (4ns 클럭 단위)
+ramp_x_voltage  = (mirror_amp) / (galvo_ramp_time * 4)
+ramp_y_voltage  = (mirror_amp) / (galvo_ramp_time * 4)
+voltage_x_add   = 2 * (-mirror_amp) / ((pixel_x - 1) * mirror_amp)
+voltage_y_add   = 2 * (-mirror_amp) / ((pixel_y - 1) * mirror_amp)
+hold_clk        = 16  # 16 * 4ns = 64ns (sticky analog 유지용 짧은 홀드)
+
+# ===== ODMR 주파수 스윕 & 평균 =====
+f_vec = np.arange(-1 * u.MHz, +1 * u.MHz, 1 * u.MHz)
+n_f   = len(f_vec)
+n_avg = 1  # 실제 측정 시 200~1000 이상으로 점증 권장
+
+readout_len      = long_meas_len_1        # ns 정수
+readout_len_half = readout_len // 4
+mw_on_amp_scale  = 1.0                    # "cw" 기본 샘플에 곱해질 스케일(0~1)
+
+# ===================================
+#             QUA Program
+# ===================================
+with program() as raster_odmr:
+
+    # --- declares ---
+    times   = declare(int, size=2000)  # 타임태깅 버퍼
+    counts  = declare(int)
+    n       = declare(int)             # averages index
+    f       = declare(int)             # IF offset 값
+    a = declare(int); b = declare(int)
+    ny = declare(int); nx = declare(int)
+
+    # 결과 스트림 (y, x, f 순으로 save되도록 순서 유지)
+    on_st  = declare_stream()
+    off_st = declare_stream()
+
+    # 진행률 스트림 (터미널 ETA용)
+    progress    = declare(int)
+    progress_st = declare_stream()
+    # 초기 0 한 번 push (일부 환경에서 첫 출력까지 버퍼링 방지)
+    save(progress, progress_st)
+
+    # ===== 초기 램프: Y→mirror_amp =====
+    with for_(a, 0, a < 6, a + 1):
+        play(ramp(ramp_y_voltage / 6), "mirror_y", duration=galvo_ramp_time + (a * 0))
+
+    # ===== Y 라인 =====
+    with for_(ny, 0, ny < pixel_y, ny + 1):
+
+        with if_(ny == 0):
+            wait(hold_clk, "mirror_y")
+        with else_():
+            play(amp(voltage_y_add) * "const", "mirror_y", duration=hold_clk)
+
+        # X 축 램프
+        with for_(b, 0, b < 6, b + 1):
+            play(ramp(ramp_x_voltage / 6), "mirror_x", duration=galvo_ramp_time + (b * 0))
+
+        # ===== X 픽셀 =====
+        with for_(nx, 0, nx < pixel_x, nx + 1):
+
+            with if_(nx == 0):
+                wait(hold_clk, "mirror_x")
+            with else_():
+                play(amp(voltage_x_add) * "const", "mirror_x", duration=hold_clk)
+
+            # ===== 평균 루프(바깥) =====
+            with for_(n, 0, n < n_avg, n + 1):
+
+                # ===== 주파수 스윕(안쪽) =====
+                with for_(*from_array(f, f_vec)):
+                    update_frequency("NV", NV_IF_freq + f)
+
+                    # ---- MW ON + 레이저 ON ----
+                    align("NV", "AOM1", "SPCM1")
+                    play("cw" * amp(mw_on_amp_scale), "NV", duration=readout_len // 2)
+                    play("laser_ON", "AOM1",            duration=readout_len // 2)
+                    wait(readout_len_half, "SPCM1")  # 초기 산란 배제
+                    measure("long_readout", "SPCM1",
+                            time_tagging.analog(times, readout_len, counts))
+                    save(counts, on_st)
+
+                    # ---- 간격 ----
+                    wait(wait_between_runs * u.ns)
+
+                    # ---- MW OFF + 레이저 ON ----
+                    align("NV", "AOM1", "SPCM1")
+                    play("cw" * amp(0), "NV", duration=readout_len // 2)
+                    play("laser_ON", "AOM1",  duration=readout_len // 2)
+                    wait(readout_len_half, "SPCM1")
+                    measure("long_readout", "SPCM1",
+                            time_tagging.analog(times, readout_len, counts))
+                    save(counts, off_st)
+
+                    # ---- 간격 ----
+                    wait(wait_between_runs * u.ns)
+
+                    # ---- 진행률: f 한 포인트 끝날 때 +1 ----
+                    assign(progress, progress + 1)
+                    save(progress, progress_st)
+
+        # 라인 종료 후 X=0 복귀
+        ramp_to_zero("mirror_x", duration=galvo_ramp_time * 12)
+
+    # 전체 종료 후 Y=0 복귀
+    ramp_to_zero("mirror_y", duration=galvo_ramp_time * 12)
+
+    # ===== 스트림 처리 =====
+    with stream_processing():
+        # (f, n_avg) 축 평균 → 픽셀(x,y) 축으로 쌓기 → (y, x, f)
+        on_st.buffer(n_f).buffer(n_avg).average().buffer(pixel_x).buffer(pixel_y).save("pl_on_cube")
+        off_st.buffer(n_f).buffer(n_avg).average().buffer(pixel_x).buffer(pixel_y).save("pl_off_cube")
+        progress_st.save("progress")  # 버퍼 없이 즉시 전달
+
+# ===================================
+#            Run / Plot
+# ===================================
+qmm = QuantumMachinesManager(host=qop_ip, port=qop_port)
+now = datetime.datetime.now()
+tag = now.strftime("%Y%m%d_%H%M%S")
+
+if simulate:
+    sim_dur = 100 * u.us // 4
+    job = qmm.simulate(config, raster_odmr, SimulationConfig(duration=sim_dur))
+    samples = job.get_simulated_samples()
+    fig, ax = plt.subplots()
+    ax.plot(samples.con1.analog["1"], label="I")
+    ax.plot(samples.con1.analog["2"], label="Q")
+    ax.plot(samples.con1.analog["3"], label="mirror_x")
+    ax.plot(samples.con1.analog["4"], label="mirror_y")
+    ax.plot(samples.con1.digital["5"], label="SPCM")
+    ax.plot(samples.con1.digital["7"], label="AOM1")
+    ax.legend(); ax.set_title("Simulation timing"); ax.grid(True, alpha=0.3)
+    plt.show()
+
+else:
+    qm  = qmm.open_qm(config)
+    job = qm.execute(raster_odmr)
+
+    # ===== 진행률 라이브 표시 =====
+    total_steps = pixel_x * pixel_y * n_avg * n_f  # n_avg × n_f × 모든 픽셀
+    results = fetching_tool(job, data_list=["progress"], mode="live")
+    start_time = results.get_start_time() or time.time()  # None 방지 폴백
+
+    last_prog = -1
+    while results.is_processing():
+        (prog,) = results.fetch_all()
+        # prog가 None/스칼라/ndarray 어떤 형식이든 마지막 값으로 스칼라화
+        if prog is None:
+            prog_val = 0
+        else:
+            arr = np.array(prog)
+            prog_val = int(arr.ravel()[-1]) if arr.size else 0
+
+        if prog_val != last_prog:
+            # 1) 내장 진행률(줄 덮어쓰기)
+            progress_counter(prog_val, total_steps, start_time=start_time)
+            # 2) 어떤 콘솔에서도 보이도록 백업 출력(강제 flush)
+            pct = 100.0 * prog_val / max(total_steps, 1)
+            eta = (time.time() - start_time) * (total_steps - prog_val) / max(prog_val, 1) if prog_val else 0
+            print(f"{prog_val}/{total_steps} ({pct:5.1f}%)  ETA {eta:,.0f}s", end="\r", flush=True)
+            last_prog = prog_val
+        # time.sleep(0.05)
+
+    print("\n[progress] done.")
+
+    # ===== 결과 취득 =====
+    rh  = job.result_handles
+    rh.wait_for_all_values()
+
+    # (가능한 모든 경우 대응: (y,x,f) 또는 (y,x,n_avg,f) 또는 (y,x,f,n_avg))
+    pl_off = np.array(rh.get("pl_off_cube").fetch_all(), dtype=float)
+    pl_on  = np.array(rh.get("pl_on_cube").fetch_all(),  dtype=float)
+
+    # ---- 디버그: 실제 측정된 형태 확인 ----
+    print(f"[shapes] pl_off {pl_off.shape}, pl_on {pl_on.shape}")
+
+    # ---- n_avg 축/ f 축 자동 식별 & 평균 처리 ----
+    def unify_yxf(arr, n_avg_expected, n_f_expected):
+        """
+        arr shape: (y, x, ... , ...)
+        return: arr_uxf with shape (y, x, f)
+        """
+        if arr.ndim == 3:
+            return arr  # 이미 (y,x,f)
+
+        if arr.ndim != 4:
+            raise ValueError(f"Unexpected ndim {arr.ndim} for ODMR cube")
+
+        y, x, a, b = arr.shape
+
+        if a == n_avg_expected and b == n_f_expected:   # (y,x,n_avg,f)
+            return arr.mean(axis=2)
+        if a == n_f_expected and b == n_avg_expected:   # (y,x,f,n_avg)
+            return arr.mean(axis=3)
+
+        if a == n_f_expected:
+            return arr.mean(axis=3)                     # 마지막 축 평균 → (y,x,f)
+        if b == n_f_expected:
+            return arr.mean(axis=2)                     # 세 번째 축 평균 → (y,x,f)
+
+        # 휴리스틱
+        f_axis = 2 if a >= b else 3
+        navg_axis = 3 if f_axis == 2 else 2
+        arr_mean = arr.mean(axis=navg_axis)
+        return arr_mean if f_axis == 2 else np.moveaxis(arr_mean, -1, 2)
+
+    pl_off_yxf = unify_yxf(pl_off, n_avg_expected=n_avg, n_f_expected=len(f_vec))
+    pl_on_yxf  = unify_yxf(pl_on,  n_avg_expected=n_avg, n_f_expected=len(f_vec))
+
+    # ---- f축 길이 동기화(측정된 길이에 맞춰 f_vec 클리핑) ----
+    n_f_meas = pl_off_yxf.shape[2]
+    if n_f_meas == 0:
+        raise RuntimeError("No frequency data collected (n_f_meas == 0).")
+    if len(f_vec) != n_f_meas:
+        print(f"[WARN] f_vec length ({len(f_vec)}) != measured n_f ({n_f_meas}). Clipping f_vec.")
+        f_vec = f_vec[:n_f_meas]
+
+    # 평균된 counts → CPS (counts/s). 이미 n_avg 평균된 값이므로 readout_len만으로 나눔
+    cps_off = pl_off_yxf / (readout_len * 1e-9)
+    cps_on  = pl_on_yxf  / (readout_len * 1e-9)
+
+    # ====== 여기만 변경: Ion/Ioff ======
+    eps = 1e-15
+    contrast_cube = cps_on / np.maximum(cps_off, eps)  # (y, x, f)  Ion/Ioff
+
+    # 좌표축(전압)
+    vx = np.linspace(mirror_amp, -mirror_amp, pixel_x, endpoint=True)
+    vy = np.linspace(mirror_amp, -mirror_amp, pixel_y, endpoint=True)
+
+    # ===== 2D: 특정 f-슬라이스 =====
+    if plot_2d_slice:
+        f_idx = int(np.argmin(np.abs(f_vec))) if len(f_vec) else 0
+        f_idx = max(0, min(f_idx, n_f_meas - 1))
+
+        C2 = contrast_cube[:, :, f_idx]  # (y, x)
+        fig, ax = plt.subplots(figsize=(8, 5))
+        vmin, vmax = np.nanpercentile(C2, 2), np.nanpercentile(C2, 98)
+        im = ax.imshow(C2, extent=[mirror_amp, -mirror_amp, mirror_amp, -mirror_amp],
+                       origin="lower", aspect="auto", cmap="viridis",
+                       vmin=vmin, vmax=vmax)
+        ax.set_xlabel("X Voltage (V)")
+        ax.set_ylabel("Y Voltage (V)")
+        ax.set_title(f"{tag}  Ion/Ioff @ IF={(NV_IF_freq + f_vec[f_idx])*1e-6:.1f} MHz")
+        plt.colorbar(im, ax=ax, label="Ion / Ioff")
+        plt.tight_layout()
+        plt.show()
+
+    # ===== 3D: z=Ion/Ioff (주파수 축 최소값) =====
+    Cmin = np.nanmin(contrast_cube, axis=2)  # (y, x)
+    if plot_3d_surface:
+        X, Y = np.meshgrid(vx, vy)
+        Z = Cmin
+        fig = plt.figure(figsize=(9, 6))
+        ax3 = fig.add_subplot(111, projection="3d")
+        surf = ax3.plot_surface(X, Y, Z, linewidth=0, antialiased=True, cmap="viridis")
+        ax3.set_xlabel("X Voltage (V)")
+        ax3.set_ylabel("Y Voltage (V)")
+        ax3.set_zlabel("Ion/Ioff (min over f)")
+        ax3.set_title(f"{tag} 3D Ion/Ioff Surface (min over f)")
+        fig.colorbar(surf, shrink=0.6, aspect=14, label="Ion / Ioff")
+        plt.tight_layout()
+        plt.show()
+
+    # CSV 저장(예시): Cmin 2D
+    df_con = pd.DataFrame(Cmin, index=vy, columns=vx)
+    df_con.index.name = "Voltage Y / Voltage X"
+    df_con.to_csv(f"{tag}_px{pixel_x}_py{pixel_y}_ion_ioff_min_over_f.csv")
