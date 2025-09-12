@@ -1,0 +1,180 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Sep 12 17:19:08 2025
+
+@author: user
+"""
+
+
+from qm import QuantumMachinesManager
+from qm.qua import *
+from qm import SimulationConfig
+import matplotlib.pyplot as plt
+import numpy as np
+from pathlib import Path
+from configuration_odmr_CHJ import *  # NV_IF_freq, NV_LO_freq, long_meas_len_1, wait_between_runs, config, u, save_dir, default_additional_files
+
+from qualang_tools.results import fetching_tool, progress_counter
+from qualang_tools.plot import interrupt_on_close
+from qualang_tools.results.data_handler import DataHandler
+
+##################
+#   Parameters   #
+##################
+# IF offset 벡터 (기준 IF=40 MHz를 중심으로 ± 스윕)
+f_vec = np.arange(-100 * u.MHz, 100 * u.MHz, 1 * u.MHz)   # [-100, +99] MHz
+n_avg = 1_000_0  # 테스트는 1,000~2,000 권장. 실제 데이터 확보시 1_000_000
+readout_len = long_meas_len_1  
+readout_len_half = readout_len//4 # 초기 산란을 버리기 위해 Sequence 조정용 parameter
+
+save_data_dict = {
+    "n_avg": n_avg,
+    "IF_frequencies": f_vec,
+    "config": config,
+}
+
+###################
+# Galvo parameter #
+###################
+
+x_want = 0.1
+y_want = 0.1
+
+galvo_ramp_time = 1_000_000 * u.ns // 4
+ramp_x_volt = (x_want) / (galvo_ramp_time*4)
+ramp_y_volt = (y_want) / (galvo_ramp_time*4)
+
+###################
+# The QUA program #
+###################
+with program() as cw_odmr:
+    times = declare(int, size=2000) # runtime 오류정정을 위하여 측정 window를 100 -> 2000 정도로 늘림.원래는 100
+    counts = declare(int)
+    counts_st = declare_stream()
+    counts_dark_st = declare_stream()
+    f = declare(int)     # IF offset (Hz)
+    n = declare(int)     # averages
+    n_st = declare_stream()
+
+    a = declare(int)
+    b = declare(int)
+
+
+    # galvo mirror 이동
+    with for_(a, 0, a < 6, a + 1):
+        play(ramp(ramp_x_volt/6), "mirror_x", duration=galvo_ramp_time + (a*0))
+    with for_(b, 0, b < 6, b + 1):
+        play(ramp(ramp_y_volt/6), "mirror_y", duration=galvo_ramp_time + (b*0))
+
+    # 싱글-포인트 ODMR averaging
+    with for_(n, 0, n < n_avg, n + 1):
+        with for_(*from_array(f, f_vec)):
+            # IF = NV_IF_freq + f (음수 IF 방지)
+            update_frequency("NV", NV_IF_freq + f)
+
+            align("NV", "AOM1", "SPCM1")
+
+            # ---- MW ON + 레이저 ON ----
+            play("cw" * amp(1), "NV", duration=readout_len//1.8) # 클럭 단위임을 감안해서 //1.8 로 설정. simulation 돌려보고, Sequence 보면 무슨 말인지 이해가능.
+            play("laser_ON", "AOM1", duration=readout_len//1.8)
+            wait(readout_len_half, "SPCM1")  # 초기 산란 버리기
+            measure("long_readout", "SPCM1",
+                    time_tagging.analog(times, readout_len, counts))
+            save(counts, counts_st)
+
+            # ---- MW OFF + 레이저 ON ----
+            wait(wait_between_runs * u.ns) 
+            align("NV", "AOM1", "SPCM1")
+            play("cw" * amp(0), "NV", duration=readout_len//1.8)
+            play("laser_ON", "AOM1", duration=readout_len//1.8)
+            wait(readout_len_half, "SPCM1")
+            measure("long_readout", "SPCM1",
+                    time_tagging.analog(times, readout_len, counts))
+            save(counts, counts_dark_st)
+
+            wait(wait_between_runs * u.ns)
+            save(n, n_st)
+
+    # 원점 복귀
+    ramp_to_zero("mirror_x", duration=galvo_ramp_time * 12)
+    ramp_to_zero("mirror_y", duration=galvo_ramp_time * 12)
+
+    with stream_processing():
+        counts_st.buffer(len(f_vec)).average().save("counts")
+        counts_dark_st.buffer(len(f_vec)).average().save("counts_dark")
+        n_st.save("iteration")
+
+#####################################
+#  Open Communication with the QOP  #
+#####################################
+qmm = QuantumMachinesManager(host=qop_ip, port=qop_port)
+
+#######################
+# Simulate or execute #
+#######################
+simulate = False
+
+if simulate:
+    simulation_config = SimulationConfig(duration=10_000_0)
+    job = qmm.simulate(config, cw_odmr, simulation_config)
+    samples = job.get_simulated_samples()
+    samples.con1.plot()
+else:
+    qm = qmm.open_qm(config)
+    job = qm.execute(cw_odmr)
+
+    results = fetching_tool(job, data_list=["counts", "counts_dark", "iteration"], mode="live")
+
+    fig = plt.figure()
+    interrupt_on_close(fig, job)
+
+    while results.is_processing():
+        counts, counts_dark, iteration = results.fetch_all()
+        progress_counter(iteration, n_avg, start_time=results.get_start_time())
+    
+        plt.cla()
+        x_if_mhz = f_vec / u.MHz
+    
+        # ===== 정규화 곡선 =====
+        norm = np.where(counts_dark > 0, counts / counts_dark, np.nan)
+        x_abs_ghz = (NV_LO_freq + (NV_IF_freq + f_vec)) / 1e9
+        plt.plot(x_abs_ghz, norm, lw=2, label="Normalized ODMR (Ion/Ioff)")
+    
+        plt.xlabel("MW frequency [GHz]")
+        plt.ylabel("Normalized ODMR signal (arb. units)")
+        plt.title("ODMR (normalized)")
+        plt.ylim(0.7, 1.05)
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+    
+        # # ===== CPS 표시 (평균값) ===== 
+        ## 완벽하지 않아 혼란방지하고자 주석표시_실제 CPS 값도 같이 보면 좋을 것 같아서 시도
+        # readout_len_ns = readout_len                # ns 단위 정수
+        # cps_on  = np.nanmean(counts)       * 1e9 / readout_len_ns
+        # cps_off = np.nanmean(counts_dark)  * 1e9 / readout_len_ns
+    
+        # ax = plt.gca()
+        # ax.text(
+        #     0.98, 0.98,
+        #     f"CPS (MW on/off)\n{cps_on:,.0f} / {cps_off:,.0f}",
+        #     transform=ax.transAxes, ha="right", va="top",
+        #     fontsize=10,
+        #     bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="gray", alpha=0.8)
+        # )
+    
+        plt.pause(0.05)
+        
+        
+    # 저장
+    script_name = Path(__file__).name
+    data_handler = DataHandler(root_data_folder=save_dir)
+
+    # 마지막 fetch 값 기준으로 norm 저장
+    norm = np.where(counts_dark > 0, counts / counts_dark, np.nan)
+
+    save_data_dict.update({"counts_data": counts})
+    save_data_dict.update({"counts_dark_data": counts_dark})
+    save_data_dict.update({"norm_Ion_over_Ioff": norm})   # ← 추가 저장
+    save_data_dict.update({"fig_live": fig})
+    data_handler.additional_files = {script_name: script_name, **default_additional_files}
+    data_handler.save_data(data=save_data_dict, name="_".join(script_name.split("_")[1:]).split(".")[0])
