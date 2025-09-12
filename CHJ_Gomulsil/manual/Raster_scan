@@ -7,7 +7,7 @@ Created on Fri Aug  8 19:23:56 2025
 
 
 """
-Galvo mirror raster scan
+Raster scan CHJ
 """
 
 import datetime
@@ -15,7 +15,7 @@ import time
 from qm import SimulationConfig, LoopbackInterface
 from qm.qua import *
 from qm import QuantumMachinesManager
-from configuration_scan_CHJ import *
+from galvo_raster_config import *
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -84,7 +84,8 @@ voltage_y_add = 2 * ( - mirror_amp) / ((pixel_y-1) * mirror_amp)
 # voltage_x_add = ( - mirror_amp) / ((pixel_x-1) * mirror_amp)
 # voltage_y_add = ( - mirror_amp) / ((pixel_y-1) * mirror_amp)
 # 2 * 제거 하여 (0,0) 까지만 Scan하도록 범위 설정할 수 있음.
-# 계수가 중요함.
+# 이처럼 계수를 통해 scan 범위 정할 수 있음.
+# 사실상 mirror_amp는 약분되기에 - 2 / (pixel_x-1) 인 상태임.
 
 
 galvo_ramp_time = 1_000_000 * u.ns // 4 # 1ms
@@ -97,8 +98,7 @@ ramp_x_voltage = (mirror_amp)/(galvo_ramp_time*4)
 ramp_y_voltage = (mirror_amp)/(galvo_ramp_time*4)
 
 
-# laser_cycle = 10 * u.ms //4
-laser_cycle = total_integration_time*1.1
+laser_cycle = total_integration_time*1.1 # AOM 작동시간이 측정시간을 충분히 커버할 수 있도록 *1.1
 laser_wait_time = count_wait_time
 wait_time = 1 * u.us //4
 
