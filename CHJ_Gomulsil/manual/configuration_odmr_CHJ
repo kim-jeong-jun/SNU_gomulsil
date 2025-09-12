@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Thu Aug 14 15:50:39 2025
+Created on Fri Sep 12 17:21:12 2025
 
 @author: user
 """
@@ -140,9 +140,9 @@ config = {
             "digital_outputs": {
                 1: {},  # AOM/Laser
                 2: {},  # AOM/Laser
-                3: {},  # SPCM1 - indicator
+                3: {},  
                 4: {},  # SPCM2 - indicator
-                5: {},
+                5: {},  # SPCM1 - indicator
                 6: {},
                 7: {},  # AOM
                 8: {},
