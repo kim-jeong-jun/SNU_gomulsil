@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Created on Fri Aug  8 19:23:56 2025
+Created on Fri Sep 12 17:13:27 2025
 
 @author: user
 """
-
 
 """
 Raster scan CHJ
@@ -15,7 +14,7 @@ import time
 from qm import SimulationConfig, LoopbackInterface
 from qm.qua import *
 from qm import QuantumMachinesManager
-from configuration_scan_CHJ import *
+from galvo_raster_config import *
 import matplotlib.pyplot as plt
 import pandas as pd
 
